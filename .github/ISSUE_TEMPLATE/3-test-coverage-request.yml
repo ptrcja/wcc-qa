@@ -1,0 +1,49 @@
+name: 🧪 Test coverage request
+description: Request automated coverage for a flow, endpoint, or page
+title: "test: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this to request new test coverage. If you're proposing an API flow, please also check
+        `tests/api/TEST_PLAN.md` for existing/planned coverage.
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search to see if coverage for this is already requested or planned.
+      options:
+        - label: I have searched the existing issues and TEST_PLAN.md
+          required: true
+  - type: dropdown
+    id: type
+    attributes:
+      label: Test type
+      options:
+        - API
+        - Admin / UI
+        - Both
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What flow or feature needs coverage?
+      description: Describe the endpoint, user flow, or page and the scenario to cover.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Scenarios / cases
+      description: List the specific cases (e.g. status codes, happy path, negative cases, edge cases).
+      placeholder: |
+        - 201 created (happy path)
+        - 409 duplicate
+        - 400 invalid payload
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Reference
+      description: Link to a spec, API doc, TEST_PLAN.md entry, or related issue (optional).
+    validations:
+      required: false

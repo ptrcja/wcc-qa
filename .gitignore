@@ -14,3 +14,7 @@ node_modules/
 .playwright-cli/
 .playwright
 
+.DS_Store
+.claude/agents/
+helpers/.DS_Store
+tests/.DS_Store
