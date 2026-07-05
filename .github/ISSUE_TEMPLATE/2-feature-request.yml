@@ -1,0 +1,36 @@
+name: 🛠️ Feature request
+description: Suggest an improvement to the framework, fixtures, or tooling
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search to see if a request for this already exists.
+      options:
+        - label: I have searched the existing issues
+          required: true
+  - type: textarea
+    attributes:
+      label: What would you like to add or change?
+      description: A clear description of the feature or enhancement.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Why should this be worked on?
+      description: The problem it solves or the use case it enables.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Possible solution
+      description: If you have an idea of how to implement it (e.g. which fixture, service, or config), describe it here.
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Any other context, examples, or references.
+    validations:
+      required: false

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Ask a question / start a discussion
+    url: https://github.com/Women-Coding-Community/wcc-qa/discussions
+    about: For questions and general discussion, please use GitHub Discussions.
+  - name: 🌐 Women Coding Community
+    url: https://www.womencodingcommunity.com/
+    about: Learn more about the community and how to get involved.
