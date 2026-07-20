@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 import { test } from "helpers/fixtures/common.fixtures";
-import { CmsEndpoints } from "helpers/datafactory/constants/paths.data";
 import { mentorResponseSchema, mentorListSchema } from "helpers/datafactory/schemas/mentor.schema";
+import { cmsMentorsPageSchema } from "helpers/datafactory/schemas/cms.schema";
 
 test.describe("Mentor — Register and Accept Flow", () => {
 	let mentorId: number | undefined;
@@ -15,11 +15,7 @@ test.describe("Mentor — Register and Accept Flow", () => {
 		mentorId = undefined;
 	});
 
-	test("Mentor can be registered, approved, and verified in platform and CMS lists", async ({
-		authApi,
-		adminApi,
-		authRequest,
-	}) => {
+	test("Mentor can be registered, approved, and verified in platform and CMS lists", async ({ authApi, adminApi }) => {
 		let mentorEmail: string;
 
 		await test.step("MENTOR-A01: Register mentor creates record with PENDING status", async () => {
@@ -50,17 +46,13 @@ test.describe("Mentor — Register and Accept Flow", () => {
 			expect(mentor.id).toBe(mentorId);
 		});
 
-		// FIXME: move to a CMS service once one exists — no CMS client/service yet.
-		await test.step.skip("MENTOR-A04: Active mentor appears in public CMS list", async () => {
-			const response = await authRequest.get(CmsEndpoints.MENTORSHIP_MENTORS);
-			expect(response.status()).toBe(200);
+		await test.step("MENTOR-A04: Active mentor appears in public CMS list", async () => {
+			const response = await authApi.cms.mentors(true);
 
-			const body = await response.json();
-			expect(body.mentors).toBeDefined();
-			expect(Array.isArray(body.mentors)).toBeTruthy();
-
-			const found = body.mentors.find((m: { email: string }) => m.email === mentorEmail);
+			const page = cmsMentorsPageSchema.parse(await response.json());
+			const found = page.mentors.find(m => m.email === mentorEmail);
 			expect(found).toBeDefined();
+			expect(found?.profileStatus).toBe("ACTIVE");
 		});
 
 		await test.step("MENTOR-A05: Approve already-active mentor returns 409", async () => {
