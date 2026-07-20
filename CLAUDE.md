@@ -12,46 +12,36 @@ You are an Automation Test Architect with extensive experience in both API and U
 
 ## Project Structure
 
+Directories and their responsibilities. Contents grow — `ls` the directory rather than trusting a list here.
+
 ```
-helpers/                           — Test support code (kept outside tests/)
+helpers/                 — Test support code, kept outside tests/
   apifactory/
-    api.service.ts                 — APIService aggregator: wires clients+services over one APIRequestContext (.authentication, .mentor, .member)
-    api.helper.ts                  — TypedAPIResponse<T> (an APIResponse whose .json() resolves to T) + ensureSuccess(response) guard
-    clients/                       — Transport layer: one method per endpoint, returns raw APIResponse (authentication, mentor, member)
-    services/                      — Business layer: builds payloads, optional ensureSuccess guard, returns TypedAPIResponse<T> (authentication, mentor, member)
+    clients/             — Transport: one method per endpoint, returns raw APIResponse
+    services/            — Business: builds payloads, optional ensureSuccess, returns TypedAPIResponse<T>
+    api.service.ts       — APIService aggregator; one property per domain
+    api.helper.ts        — TypedAPIResponse<T> + ensureSuccess() guard
   datafactory/
-    constants/
-      paths.data.ts                — All API endpoint path enums (CmsEndpoints, AuthEndpoints, PlatformEndpoints)
-      roles.data.ts                — USERS: per-role config (email, password, storageState) + Role type
-    schemas/
-      auth.schema.ts               — Login/auth Zod schemas
-      member.dto.schema.ts         — Member DTO Zod schema
-      mentor.schema.ts             — Mentor response Zod schema + profileStatus enum
-      user.account.schema.ts       — User account Zod schema
-    mentor.factory.ts              — Mentor payload factory using Faker
-  fixtures/
-    common.fixtures.ts             — API fixtures: contexts (authRequest, adminContext/leaderContext/mentorContext/mentorshipAdminContext, contextForRole) + APIService fixtures (authApi, adminApi/leaderApi/mentorApi/mentorshipAdminApi, apiForRole)
-    pom.fixture.ts                 — UI fixtures: page objects (basePage, loginPage)
-    index.ts                       — Merged test (API + POM); specs import { test } from 'helpers/fixtures'
+    constants/           — Endpoint path enums, role/user config
+    schemas/             — Zod response schemas, one file per resource
+    *.factory.ts         — Faker payload factories, one per resource
+  fixtures/              — API fixtures, POM fixtures, and the merged `test` (index.ts)
 
 tests/
-  .env                             — Env vars: API_HOST, API_KEY, ADMIN_BASE_URL, role creds (ADMIN_EMAIL/PASSWORD, …)
+  .env                   — All env vars (gitignored; see .env.example)
   api/
-    TEST_PLAN.md                   — API flow test plan (all flows and test case IDs)
-    tests/
-      auth/
-        auth.flow.spec.ts          — Auth API tests (Flow 1)
-      platform/
-        mentor.register.accept.flow.spec.ts — Mentor register & accept flow (Flow 2)
+    TEST_PLAN.md         — API flow plan: every flow and test case ID
+    tests/{area}/        — API specs grouped by domain area
   admin/
-    .auth/                         — Saved per-role login sessions (gitignored)
-    setup.ts                       — Setup project: logs each role in, saves storageState
-    pages/                         — Admin page objects (base.page, login.page)
-    tests/                         — Admin tests (login, dashboard)
+    pages/               — Admin page objects
+    tests/               — Admin specs
+    setup.ts             — Setup project: logs each role in, saves storageState
+    .auth/               — Saved per-role sessions (gitignored)
 
-playwright.config.ts               — Three projects: setup, api, admin (admin depends on setup)
-tsconfig.json                      — paths: helpers/* and tests/* resolve from root (no baseUrl)
+playwright.config.ts     — Projects: setup, api, admin (admin depends on setup)
 ```
+
+**Anchors worth knowing by name:** `helpers/apifactory/api.service.ts` (register new services here), `helpers/datafactory/constants/paths.data.ts` (all endpoint enums), `helpers/datafactory/constants/roles.data.ts` (`USERS`, `Role`), `helpers/fixtures/index.ts` (merged `test`).
 
 ---
 
@@ -77,7 +67,7 @@ Two-layer API design, aggregated by `APIService` (`helpers/apifactory/api.servic
   - Takes a trailing `ensureSuccess = false` flag; when `true`, calls `ensureSuccess(response)` from `api.helper.ts` to throw on a non-ok response (happy path / preconditions / cleanup).
   - **Always returns `TypedAPIResponse<T>`** so callers get a typed `.json()`. (Delete-style calls with no body return plain `APIResponse`.)
 - **`api.helper.ts`** — `TypedAPIResponse<T>` (typed `.json()`) and the `ensureSuccess(response)` guard.
-- **Fixtures** — `authApi` (X-API-KEY only) for public endpoints; `adminApi` / `leaderApi` / `mentorApi` / `mentorshipAdminApi` for authenticated roles; `apiForRole(role)` for role-matrix tests. Each wraps an `APIService` over the matching context.
+- **Fixtures** — `authApi` (X-API-KEY only) for public endpoints; `<role>Api` for authenticated roles; `apiForRole(role)` for role-matrix tests. Each wraps an `APIService` over the matching context. Tokens are cached per worker, so each role logs in at most once.
 
 **In tests:** call the service, assert the status when a specific code matters (201/204/409), then validate the body with `schema.parse(await response.json())`. Use `ensureSuccess: true` for the happy path; for negative cases leave it `false` and assert the status on the returned response.
 
@@ -85,32 +75,36 @@ Two-layer API design, aggregated by `APIService` (`helpers/apifactory/api.servic
 
 ## MUST (Mandatory)
 
-| Rule                        | Requirement                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Dependency Injection**    | Use fixtures from `helpers/fixtures` (merged API + POM). API services via `authApi`/`adminApi`/…; admin page objects via `loginPage`/`basePage`. Never `new PageObject(page)` in tests (the `setup.ts` setup project is the only exception).                                                                                                                                                                                                                   |
-| **Imports — tests**         | `import { test } from 'helpers/fixtures'` and `import { expect } from '@playwright/test'`. For unauthenticated calls only: `import { test as baseTest } from '@playwright/test'`                                                                                                                                                                                                                                                                               |
-| **Fixture selection**       | Prefer the **APIService fixtures** for service-layer calls: `authApi` (X-API-KEY only), `adminApi`/`leaderApi`/`mentorApi`/`mentorshipAdminApi` (X-API-KEY + that role's token), or `apiForRole(role)` for permission-matrix tests. Use the raw **context** fixtures (`authRequest`, `adminContext`, `leaderContext`, `mentorContext`, `mentorshipAdminContext`, `contextForRole(role)`) only for endpoints with no service method yet (mark with `// FIXME`). |
-| **Imports — Paths**         | Import endpoint enums (`AuthEndpoints`, `CmsEndpoints`, `PlatformEndpoints`) from `helpers/datafactory/constants/paths.data`. Import Zod schemas from `helpers/datafactory/schemas/`                                                                                                                                                                                                                                                                           |
-| **Dynamic Test Data**       | Always generate dynamic request payloads using Faker factories in `helpers/datafactory/`. Call the factory **inside the service method body** (e.g. `MentorService.register`), not in spec files. Never hardcode test data strings (names, emails, bios).                                                                                                                                                                                                      |
-| **Service Layer**           | Add new endpoints as a **client** method (raw `APIResponse`) + a **service** method that builds the payload in its body, takes `ensureSuccess = false`, and returns `TypedAPIResponse<T>`. Keep caller-owned inputs (credentials, ids) as discrete params. Register the service in `api.service.ts`.                                                                                                                                                           |
-| **Selectors**               | Prioritize: `getByRole()` > `getByLabel()` > `getByPlaceholder()` > `getByText()` > `getByTestId()`                                                                                                                                                                                                                                                                                                                                                            |
-| **Type Safety**             | Use Zod schemas in `helpers/datafactory/schemas/`. Validate responses in the test with `schema.parse(await response.json())`; don't assert what the schema already guarantees (e.g. a `.min(1)` / `z.email()` field's presence). No `any` type.                                                                                                                                                                                                                |
-| **Assertions**              | Web-first assertions only: `expect(locator).toBeVisible()`, never `waitForTimeout()`                                                                                                                                                                                                                                                                                                                                                                           |
-| **No Secrets**              | Never hardcode credentials. Use `process.env` variables defined in the relevant `.env` file                                                                                                                                                                                                                                                                                                                                                                    |
-| **API Test Steps**          | When a test has 2+ API calls, each MUST be in a dedicated `test.step()` with validation                                                                                                                                                                                                                                                                                                                                                                        |
-| **Test Verification**       | After adding or modifying test files, run `npx playwright test [file] --project=[api\|admin]` and confirm all tests pass                                                                                                                                                                                                                                                                                                                                       |
-| **Explore Before Generate** | **API:** Make a real request to the endpoint before writing Zod schemas to capture actual field names, types, and optional fields. **UI:** Navigate to the page in a browser before writing page objects or selectors.                                                                                                                                                                                                                                         |
+| Rule                        | Requirement                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dependency Injection**    | Use fixtures from `helpers/fixtures` (merged API + POM). API services via `authApi`/`adminApi`/…; admin page objects via `loginPage`/`basePage`. Never `new PageObject(page)` in tests (the `setup.ts` setup project is the only exception).                                                                                                                                                                                                                         |
+| **Imports — tests**         | `import { test } from 'helpers/fixtures'` (merged) and `import { expect } from '@playwright/test'`. API-only specs may import `helpers/fixtures/common.fixtures` instead to skip the POM fixtures — both are in use today. Never import `test` from `@playwright/test` in a spec                                                                                                                                                                                     |
+| **Fixture selection**       | Prefer the **APIService fixtures**: `authApi` (X-API-KEY only), `<role>Api` (X-API-KEY + that role's token), or `apiForRole(role)` for permission-matrix tests. Use the raw **context** fixtures (`authRequest`, `<role>Context`, `contextForRole(role)`) only for endpoints with no service method yet, or for deliberately malformed payloads a service won't build — mark with `// FIXME`                                                                         |
+| **Imports — Paths**         | Import endpoint enums (`AuthEndpoints`, `CmsEndpoints`, `PlatformEndpoints`) from `helpers/datafactory/constants/paths.data`. Import Zod schemas from `helpers/datafactory/schemas/`                                                                                                                                                                                                                                                                                 |
+| **Dynamic Test Data**       | Always generate dynamic request payloads using Faker factories in `helpers/datafactory/`. Call the factory **inside the service method body** (e.g. `MentorService.register`), not in spec files. Never hardcode test data strings (names, emails, bios).                                                                                                                                                                                                            |
+| **Service Layer**           | Add new endpoints as a **client** method (raw `APIResponse`) + a **service** method that builds the payload in its body, takes `ensureSuccess = false`, and returns `TypedAPIResponse<T>`. Keep caller-owned inputs (credentials, ids) as discrete params. Register the service in `api.service.ts`.                                                                                                                                                                 |
+| **Selectors**               | Prioritize: `getByRole()` > `getByLabel()` > `getByPlaceholder()` > `getByText()` > `getByTestId()`                                                                                                                                                                                                                                                                                                                                                                  |
+| **Type Safety**             | Use Zod schemas in `helpers/datafactory/schemas/`. Validate responses in the test with `schema.parse(await response.json())`; don't assert what the schema already guarantees (e.g. a `.min(1)` / `z.email()` field's presence). No `any` type.                                                                                                                                                                                                                      |
+| **Assertions — UI**         | Web-first assertions only: `expect(locator).toBeVisible()`, never `waitForTimeout()`                                                                                                                                                                                                                                                                                                                                                                                 |
+| **Assertions — API**        | Assert the status when a specific code matters (`expect(response.status()).toBe(409)`), then validate the body with `schema.parse()`                                                                                                                                                                                                                                                                                                                                 |
+| **No Secrets**              | Never hardcode credentials. Use `process.env` variables defined in the relevant `.env` file. Never log a token, password, or `API_KEY`, and never assert on a secret's literal value                                                                                                                                                                                                                                                                                 |
+| **Artefacts Are Sensitive** | Traces, HTML reports and `test-results/` capture request headers — including `Authorization: Bearer` tokens and `X-API-KEY`. They are gitignored; never attach them to a GitHub issue, PR, or external share without stripping headers first                                                                                                                                                                                                                         |
+| **API Test Steps**          | When a test has 2+ API calls, each MUST be in a dedicated `test.step()` with validation                                                                                                                                                                                                                                                                                                                                                                              |
+| **Test Verification**       | After adding or modifying any `.ts` file, run `npm run typecheck`. After adding or modifying test files, also run `npx playwright test [file] --project=[api\|admin]` and confirm all tests pass                                                                                                                                                                                                                                                                     |
+| **Test IDs**                | Every plan ID appears in the test that covers it. **One test per ID:** put it in the `test.describe()` title (`AUTH-01: Login`). **One flow test covering several IDs:** put each ID on its `test.step()` (`MENTOR-A01: …`) and give the describe a plain descriptive title. **API tests:** every ID must have a matching row in `tests/api/TEST_PLAN.md`, added in the same change. **Admin tests:** no plan file yet — use `ADMIN-<AREA>-<NN>` and keep IDs unique |
+| **Explore Before Generate** | **API:** Make a real request to the endpoint before writing Zod schemas to capture actual field names, types, and optional fields. **UI:** Navigate to the page in a browser before writing page objects or selectors.                                                                                                                                                                                                                                               |
 
 ---
 
 ## SHOULD (Recommended)
 
-| Rule               | Recommendation                                                                                        |
-| ------------------ | ----------------------------------------------------------------------------------------------------- |
-| **Test Isolation** | Tests should be independent. Use `test.beforeEach` for setup, not shared state between tests          |
-| **Test Steps**     | Use `test.step()` with Given/When/Then structure for better readability and reporting                 |
-| **Data Files**     | Extract test data into `helpers/datafactory/` rather than inlining large datasets in spec files       |
-| **Page Actions**   | Define reusable actions (navigate, click, verify) on page objects rather than repeating them in tests |
+| Rule               | Recommendation                                                                                                                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Test Isolation** | Tests should be independent — no shared mutable state, no execution-order dependency. Use `beforeEach`/`afterEach` for per-test setup and cleanup, `beforeAll`/`afterAll` for a resource genuinely shared across a describe block |
+| **Clean Up**       | A test that creates a server-side record deletes it again (see the `afterEach` in `mentor.register.accept.flow.spec.ts`). Exploratory `curl` probes count too — delete what you create                                            |
+| **Test Steps**     | Use `test.step()` with Given/When/Then structure for better readability and reporting                                                                                                                                             |
+| **Data Files**     | Extract test data into `helpers/datafactory/` rather than inlining large datasets in spec files                                                                                                                                   |
+| **Page Actions**   | Define reusable actions (navigate, click, verify) on page objects rather than repeating them in tests                                                                                                                             |
 
 ---
 
@@ -127,6 +121,7 @@ Two-layer API design, aggregated by `APIService` (`helpers/apifactory/api.servic
 | **No Hardcoded Endpoints**   | Never write raw URL strings in tests. Always use enums from `helpers/datafactory/constants/paths.data`                            |
 | **No Explore-Only Files**    | Never commit test files whose sole purpose is dumping HTML or exploring structure                                                 |
 | **No Silent Coverage Drops** | Never omit a test because the API doesn't behave as expected. Use `test.skip` with `// FIXME` comment instead                     |
+| **No Magic Numbers**         | Never inline timeouts, retry counts, or repeated numeric literals. Define them in `helpers/datafactory/constants/`                |
 
 ---
 
@@ -148,25 +143,57 @@ Two-layer API design, aggregated by `APIService` (`helpers/apifactory/api.servic
 
 ## AI Workflow
 
-1. **Read This File** — Always loaded. Check it before generating any code.
-2. **Explore First**
-   - **API:** Before writing a Zod schema, make a real request to the endpoint and inspect the actual response shape. Do not infer schema from documentation alone.
-   - **UI:** Before creating or editing page objects, open the page in a browser to verify actual roles, labels, and DOM structure.
-3. **Build Coverage Plan (API tests)** — Before writing API test code, enumerate every status code for the target endpoint. For each, state what the test will cover. Present the plan and get confirmation before generating code.
-4. **Locate Existing Patterns** — Check `tests/admin/pages/` and `helpers/datafactory/schemas/` for existing patterns to follow before creating new files.
-5. **Register New Fixtures** — When adding a new page object, register it in the admin fixtures file.
-6. **Add New Paths** — When testing a new endpoint, add the path enum to the appropriate enum in `helpers/datafactory/constants/paths.data.ts`. Create a new enum if the area doesn't exist yet (e.g. `PlatformEndpoints`, `CmsEndpoints`).
-7. **Create a Factory** — For any new resource type, create a Faker factory in `helpers/datafactory/[name].factory.ts` and call it inside the service method that builds the request (not in the spec).
-8. **Run Tests** — After generating or modifying test files, run the affected tests and confirm they all pass before reporting the task complete.
+The MUST/SHOULD/WON'T tables above are the rules; this section is the **order of operations**. Where the two overlap, the tables win.
+
+### Covering a new API endpoint
+
+1. **Explore** — Make a real request and inspect the actual response. Never infer the shape from `TEST_PLAN.md`, Swagger, or the backend source alone.
+2. **Locate patterns** — Read the nearest existing client/service/schema trio (e.g. `mentor.*`) before creating files.
+3. **Coverage plan** — Enumerate every status code the endpoint returns and what each test will cover. Present it and get confirmation before writing code.
+4. **Path enum** — Add to the matching enum in `helpers/datafactory/constants/paths.data.ts` (`CmsEndpoints`, `PlatformEndpoints`, `AuthEndpoints`); create a new enum if the area doesn't exist.
+5. **Zod schema** — Add or extend `helpers/datafactory/schemas/[name].schema.ts` from the response captured in step 1.
+6. **Client method** — One method per endpoint in `helpers/apifactory/clients/[name].client.ts`, returning the raw `APIResponse`. No assertions, no parsing.
+7. **Service method** — In `helpers/apifactory/services/[name].service.ts`: builds the payload in its body, keeps caller-owned inputs as discrete params, takes a trailing `ensureSuccess = false`, returns `TypedAPIResponse<T>`. **Register the service on `APIService` in `api.service.ts`** if the domain is new.
+8. **Factory** — For a new resource type, add `helpers/datafactory/[name].factory.ts` and call it inside the service method, never in the spec.
+9. **Spec + plan row** — Write the spec with the flow ID in the `test.describe()` title, and add the matching row to `tests/api/TEST_PLAN.md` in the same change.
+10. **Verify** — `npm run typecheck`, then `npm run test:api`.
+
+### Covering a new admin UI page
+
+1. **Explore** — Open the page in a browser and verify real roles, labels, and DOM structure before writing any selector.
+2. **Locate patterns** — Follow `tests/admin/pages/login.page.ts`.
+3. **Page object** — Add `tests/admin/pages/[name].page.ts`.
+4. **Register the fixture** — Add it to both the `POMFixtures` interface and the `base.extend` block in `helpers/fixtures/pom.fixture.ts`.
+5. **Spec** — Write it in `tests/admin/tests/`, flow ID in the `test.describe()` title.
+6. **Verify** — `npm run typecheck`, then `npm run test:admin`.
 
 ---
 
 ## Running Tests
 
+### Prerequisites
+
+Tests run against **live local services** — there is no mocking. Failures are far more often a missing service than a broken test.
+
+| Project | Needs                                                                                   | Symptom when missing                                                          |
+| ------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `api`   | wcc-backend on `API_HOST` (`docker compose -f docker/docker-compose.qa.yml up --build`) | Connection refused / every test fails at login                                |
+| `admin` | the above **plus** the Next.js admin frontend on `ADMIN_BASE_URL`                       | Every admin test fails in the `setup` project before its own body runs        |
+| both    | `tests/.env` populated from `tests/.env.example`                                        | `Missing required env var "X" — check tests/.env` (thrown by `roles.data.ts`) |
+
+Use the backend's **`qa` profile** specifically — it seeds the MENTORSHIP_ADMIN, MENTOR and LEADER accounts the role fixtures log in as. The default profile seeds only admin.
+
+`admin` depends on the `setup` project, which drives a real browser login per role and writes `tests/admin/.auth/*.json`. A wall of admin failures with no assertion errors means setup could not reach the frontend.
+
+### Commands
+
 ```bash
+# Type-check without running anything (fastest feedback on schema/type errors)
+npm run typecheck
+
 # Run all tests for a specific project
-npx playwright test --project=api
-npx playwright test --project=admin
+npm run test:api      # = playwright test --project=api
+npm run test:admin    # = playwright test --project=admin
 
 # Run a specific file
 npx playwright test tests/api/tests/auth/auth.flow.spec.ts --project=api
@@ -204,12 +231,11 @@ The hook installs via the `prepare` script on `npm install`. A non-auto-fixable 
 
 All variables live in `tests/.env` (see `tests/.env.example`). Role credentials feed both the `USERS` model and the per-role API fixtures.
 
-| Variable                                               | Used by                                                                |
-| ------------------------------------------------------ | ---------------------------------------------------------------------- |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                       | `USERS.admin` — `adminApi`/`adminContext` + admin setup                |
-| `LEADER_EMAIL` / `LEADER_PASSWORD`                     | `USERS.leader` — `leaderApi`/`leaderContext` + setup                   |
-| `MENTOR_EMAIL` / `MENTOR_PASSWORD`                     | `USERS.mentor` — `mentorApi`/`mentorContext` + setup                   |
-| `MENTORSHIP_ADMIN_EMAIL` / `MENTORSHIP_ADMIN_PASSWORD` | `USERS.mentorshipAdmin` — `mentorshipAdminApi`/…Context + setup        |
-| `API_HOST`                                             | api project base URL                                                   |
-| `API_KEY`                                              | X-API-KEY header (all API requests)                                    |
-| `ADMIN_BASE_URL`                                       | admin project base URL (optional; defaults to `http://localhost:3000`) |
+| Variable                           | Used by                                                                                                                                                           |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<ROLE>_EMAIL` / `<ROLE>_PASSWORD` | One pair per role in `roles.data.ts` → `USERS.<role>`, the `<role>Api`/`<role>Context` fixtures, and admin setup. Missing values throw at load with a named error |
+| `API_HOST`                         | api project base URL                                                                                                                                              |
+| `API_KEY`                          | X-API-KEY header (all API requests)                                                                                                                               |
+| `ADMIN_BASE_URL`                   | admin project base URL (optional; defaults to `http://localhost:3000`)                                                                                            |
+
+`roles.data.ts` is the single source of truth for which roles exist — adding one there means adding its `.env` pair and its fixtures.

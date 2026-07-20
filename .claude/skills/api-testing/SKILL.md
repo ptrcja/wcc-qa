@@ -1,331 +1,162 @@
 ---
 name: api-testing
-description: API testing patterns -- authRequest + per-role context fixtures, schema validation, and setup/teardown for WCC QA framework
+description: Worked examples for WCC QA API tests -- APIService fixture selection, service-layer calls, coverage matrix, and negative/validation test patterns. Use when writing or reviewing tests under tests/api/.
 ---
 
-# API Testing
+# API Testing — Worked Examples
 
-## Fixtures
+CLAUDE.md holds the rules (MUST/SHOULD/WON'T tables and the architecture description). This skill holds the **worked examples** for applying them. Where the two disagree, CLAUDE.md wins — and the disagreement is a bug worth fixing here.
 
-Fixtures for API tests are provided by `helpers/fixtures/fixtures.ts`:
+## Choosing a fixture
 
-| Fixture                                                                  | When to use                                                        | Auth                              |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------- |
-| `request`                                                                | Unauthenticated calls (login, public endpoints)                   | None — plain Playwright fixture   |
-| `authRequest`                                                            | Endpoints needing only `X-API-KEY` (e.g. `POST /mentors`)         | `X-API-KEY` header only           |
-| `adminContext` / `leaderContext` / `mentorContext` / `mentorshipAdminContext` | Endpoints needing a `Bearer` token, run as a specific role   | `X-API-KEY` + that role's token   |
-| `contextForRole(role)`                                                   | Permission-matrix tests that loop over roles                      | `X-API-KEY` + the chosen role's token |
+All fixtures come from `helpers/fixtures` (merged API + POM). Prefer the **APIService** fixtures — they expose the service layer (`.authentication`, `.cms`, `.mentor`, `.member`).
 
-Each role context logs in with that role's `*_EMAIL` / `*_PASSWORD` env vars and creates an `APIRequestContext` with the correct headers. Tokens are cached per worker (each role logs in at most once per worker), and contexts are disposed after the test. The `Role` type is `'admin' | 'leader' | 'mentor' | 'mentorshipAdmin'`.
+| Fixture                                                       | When to use                                              | Auth                              |
+| ------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------- |
+| `authApi`                                                     | Public / registration endpoints (login, `POST /mentors`) | `X-API-KEY` only                  |
+| `adminApi` / `leaderApi` / `mentorApi` / `mentorshipAdminApi` | Endpoints needing a Bearer token, as a specific role     | `X-API-KEY` + that role's token   |
+| `apiForRole(role)`                                            | Permission-matrix tests looping over roles               | `X-API-KEY` + chosen role's token |
 
-### Unauthenticated test (use `baseTest` from `@playwright/test`)
+The raw context fixtures (`authRequest`, `adminContext`, …, `contextForRole`) are an **escape hatch only** — use them when an endpoint has no service method yet, and mark the call with `// FIXME`. The fix is to add the client + service method, not to keep using the context.
+
+Tokens are cached per worker (each role logs in at most once), and contexts are disposed after the test.
+
+## Happy path — service call + schema parse
 
 ```typescript
-import { expect, test as baseTest } from '@playwright/test';
-import { AuthEndpoints } from 'helpers/datafactory/constants/paths.data';
-import { loginResponseSchema } from 'helpers/datafactory/schemas/auth.schema';
+import { expect } from "@playwright/test";
+import { test } from "helpers/fixtures";
+import { loginResponseSchema } from "helpers/datafactory/schemas/auth.schema";
+import { USERS } from "helpers/datafactory/constants/roles.data";
 
-baseTest.describe('AUTH-01: Login', () => {
-  baseTest('Login with valid credentials returns token', async ({ request }) => {
-    const response = await request.post(AuthEndpoints.LOGIN, {
-      data: {
-        email: process.env.ADMIN_EMAIL,
-        password: process.env.ADMIN_PASSWORD,
-      },
-    });
+test.describe("AUTH-01: Login", () => {
+	// eslint-disable-next-line playwright/expect-expect -- schema.parse() throws on a malformed response, so it is the assertion.
+	test("Login with valid credentials returns token", async ({ authApi }) => {
+		const response = await authApi.authentication.login(USERS.admin.email, USERS.admin.password, true);
 
-    const body = await response.json();
-
-    expect(response.status()).toBe(200);
-    expect(loginResponseSchema.parse(body)).toBeTruthy();
-  });
+		loginResponseSchema.parse(await response.json());
+	});
 });
 ```
 
-### Authenticated test (use `test` from fixtures)
+Note the trailing `true` — that's `ensureSuccess`, which throws on a non-ok response. Use it for happy paths, preconditions, and cleanup. Read credentials from `USERS` (`helpers/datafactory/constants/roles.data`), never `process.env` directly in a spec.
 
-Pick the role context the scenario needs. `GET /api/auth/users` requires a Bearer token, so use `adminContext` (not `authRequest`, which only carries `X-API-KEY`).
+## Negative path — leave `ensureSuccess` off and assert the status
 
 ```typescript
-import { expect } from '@playwright/test';
-import { test } from 'helpers/fixtures/fixtures';
-import { AuthEndpoints } from 'helpers/datafactory/constants/paths.data';
-import { usersResponseSchema } from 'helpers/datafactory/schemas/user.account.schema';
+test("Get users as mentor is forbidden", async ({ mentorApi }) => {
+	const response = await mentorApi.authentication.getUsers();
 
-test.describe('AUTH-07: Users', () => {
-  test('Get users as admin returns user list', async ({ adminContext }) => {
-    const response = await adminContext.get(AuthEndpoints.USERS);
-
-    expect(response.status()).toBe(200);
-
-    const body = await response.json();
-    const users = usersResponseSchema.parse(body);
-    expect(users.length).toBeGreaterThan(0);
-  });
-
-  test('Get users as mentor is forbidden', async ({ mentorContext }) => {
-    const response = await mentorContext.get(AuthEndpoints.USERS);
-    expect(response.status()).toBe(403);
-  });
+	expect(response.status()).toBe(403);
 });
 ```
 
-### Permission-matrix test (loop roles via the factory)
+Don't re-assert what the schema already guarantees. If a field is `z.string().min(1)`, `parse()` passing _is_ the assertion that it's present and non-empty.
+
+## Permission matrix
 
 ```typescript
-for (const role of ['leader', 'mentor'] as const) {
-  test(`${role} cannot approve mentors`, async ({ contextForRole }) => {
-    const ctx = await contextForRole(role);
-    const response = await ctx.patch(`${PlatformEndpoints.MENTORS}/1/accept`);
-    expect(response.status()).toBe(403);
-  });
+for (const role of ["leader", "mentor"] as const) {
+	test(`${role} cannot approve mentors`, async ({ apiForRole }) => {
+		const api = await apiForRole(role);
+
+		const response = await api.mentor.accept(mentorId);
+
+		expect(response.status()).toBe(403);
+	});
 }
 ```
 
-## Imports
+## Multi-call flows — one `test.step` per call
 
 ```typescript
-// Authenticated tests
-import { expect } from '@playwright/test';
-import { test } from 'helpers/fixtures/fixtures';
+test("Mentor can be registered and approved", async ({ authApi, adminApi }) => {
+	let mentorId: number;
 
-// Unauthenticated tests only
-import { expect, test as baseTest } from '@playwright/test';
+	await test.step("Register mentor — 201, status PENDING", async () => {
+		const response = await authApi.mentor.register(true);
 
-// Endpoint enums
-import { AuthEndpoints } from 'helpers/datafactory/constants/paths.data';
-import { CmsEndpoints } from 'helpers/datafactory/constants/paths.data';
+		const mentor = mentorResponseSchema.parse(await response.json());
+		expect(mentor.profileStatus).toBe("PENDING");
+		mentorId = mentor.id;
+	});
 
-// Schemas
-import { loginResponseSchema } from 'helpers/datafactory/schemas/auth.schema';
-import { usersResponseSchema } from 'helpers/datafactory/schemas/user.account.schema';
-```
+	await test.step("Approve mentor — 200, status ACTIVE", async () => {
+		const response = await adminApi.mentor.accept(mentorId, true);
 
-**Never** import `test` from `@playwright/test` in authenticated test files — use the fixture `test` so `authRequest` and the role contexts are available.
-
-## Making Requests
-
-Use Playwright's native `APIRequestContext` methods directly:
-
-```typescript
-// GET (Bearer-protected — use a role context)
-const response = await adminContext.get(AuthEndpoints.USERS);
-
-// POST with body (public — X-API-KEY only)
-const response = await request.post(AuthEndpoints.LOGIN, {
-  data: { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD },
-});
-
-// PUT / PATCH / DELETE (Bearer-protected — use a role context)
-const response = await adminContext.put(`${AuthEndpoints.USERS}/${id}`, { data: payload });
-const response = await adminContext.delete(`${AuthEndpoints.USERS}/${id}`);
-```
-
-Read the response body after the call:
-
-```typescript
-const body = await response.json();   // parsed JSON
-const status = response.status();     // numeric status code
-```
-
-## Response Validation
-
-**Always** validate API responses with Zod schemas:
-
-```typescript
-const body = await response.json();
-
-expect(response.status()).toBe(200);
-expect(loginResponseSchema.parse(body)).toBeTruthy();  // throws if schema invalid
-```
-
-`schema.parse()` provides runtime validation — it throws a `ZodError` with a descriptive message if the response shape doesn't match.
-
-## Test Steps for Multiple API Calls
-
-**MANDATORY:** When a test contains more than one API call, each call **MUST** be wrapped in a dedicated `test.step()` with a descriptive name and validation:
-
-```typescript
-test('should register a mentor and find it in the admin list', async ({ authRequest, adminContext }) => {
-  let mentorEmail: string;
-
-  await test.step('POST /api/platform/v1/mentors — registers a mentor (X-API-KEY only)', async () => {
-    const payload = buildMentorPayload();
-    mentorEmail = payload.email;
-
-    const response = await authRequest.post(PlatformEndpoints.MENTORS, { data: payload });
-
-    expect(response.status()).toBe(201);
-    expect(mentorResponseSchema.parse(await response.json()).profileStatus).toBe('PENDING');
-  });
-
-  await test.step('GET /api/platform/v1/mentors — admin sees the new mentor', async () => {
-    const response = await adminContext.get(PlatformEndpoints.MENTORS);
-    const body = await response.json();
-
-    expect(response.status()).toBe(200);
-    expect(body.find((m: { email: string }) => m.email === mentorEmail)).toBeDefined();
-  });
+		const mentor = mentorResponseSchema.parse(await response.json());
+		expect(mentor.profileStatus).toBe("ACTIVE");
+	});
 });
 ```
 
-Single API call — `test.step` is optional but recommended for consistency.
+The Faker payload is built **inside** `mentor.register()`, not in the spec. If you need the generated values, read them off the response.
 
-## Endpoint Paths
+## Coverage matrix
 
-All endpoint paths live in `helpers/datafactory/constants/paths.data.ts` as enums. **Never** write raw URL strings in test files.
+For every endpoint × method, cover every status code the API can return. Baseline:
 
-```typescript
-// CORRECT
-import { AuthEndpoints, CmsEndpoints } from 'helpers/datafactory/constants/paths.data';
+| Scenario                                  | Status  | Assert                                     |
+| ----------------------------------------- | ------- | ------------------------------------------ |
+| Happy path (valid auth + body)            | 200/201 | Schema parses + key fields match sent data |
+| Missing Authorization header              | 401     | `status === 401`                           |
+| Insufficient permissions (wrong role)     | 403     | `status === 403`                           |
+| Empty body (POST/PUT/PATCH)               | 400/422 | Error schema parses                        |
+| Each required field omitted individually  | 400/422 | One test per field — see below             |
+| Each field with type-inappropriate values | 400/422 | `for...of` loop per field — see below      |
+| Non-existent resource ID                  | 404     | `status === 404`                           |
+| Unsupported HTTP method                   | 405     | At least one per endpoint                  |
 
-await request.post(AuthEndpoints.LOGIN, { ... });
-await authRequest.get(CmsEndpoints.TEAM);
+One `test.describe` per method + path. Use `beforeAll`/`afterAll` (not `beforeEach`) for resources shared across tests in a describe block.
 
-// FORBIDDEN
-await request.post('/api/auth/login', { ... });
-```
+## Negative / validation patterns
 
-To add a new endpoint, add it to the appropriate enum in `helpers/datafactory/constants/paths.data.ts`. Create a new enum if the area doesn't exist yet.
+An empty-body test alone is never sufficient.
 
-## Zod Schemas
-
-Schemas live in `helpers/datafactory/schemas/` and use `z.object()` or `.strict()`.
-
-```typescript
-// helpers/datafactory/schemas/auth.schema.ts
-import { z } from 'zod';
-
-export const loginResponseSchema = z.object({
-  token: z.string().min(1),
-  expiresAt: z.string().min(1),
-  roles: z.array(roleTypeSchema).min(1),
-  member: memberDtoSchema.optional().nullable(),
-  message: z.string().optional().nullable(),
-});
-```
-
-Use `.strict()` on schemas where unexpected fields should be rejected:
+### Field omission
 
 ```typescript
-export const userAccountSchema = z.object({
-  id: z.number(),
-  email: z.string(),
-  roles: z.array(roleTypeSchema),
-  enabled: z.boolean(),
-}).strict();
-```
+const requiredFields = ["email", "password"] as const;
 
-**Before writing a new schema**, make a real request to the endpoint and inspect the actual response — do not guess field names or types from documentation.
+for (const field of requiredFields) {
+	test(`Login returns 400 when ${field} is missing`, async ({ authRequest }) => {
+		const { [field]: _omitted, ...payload } = validPayload;
 
-### Schema Location
+		// FIXME: no service method for malformed-login payloads — using the raw context.
+		const response = await authRequest.post(AuthEndpoints.LOGIN, { data: payload });
 
-```
-helpers/datafactory/schemas/
-  auth.schema.ts          — Login response, role enum
-  member.dto.schema.ts    — Member DTO
-  user.account.schema.ts  — User account, permissions enum
-```
-
-Add new schemas here. Name the file `[resource].schema.ts`.
-
-## Comprehensive Testing Coverage
-
-For every endpoint × HTTP method, cover every status code listed in the API spec. Minimum baseline:
-
-| Scenario                                    | Status  | What to assert                                               |
-| ------------------------------------------- | ------- | ------------------------------------------------------------ |
-| Happy path (valid auth + valid body)        | 200/201 | Schema parse passes + key fields match sent data             |
-| Missing Authorization header                | 401     | `status === 401`, validate body with schema or check `null`  |
-| Insufficient permissions (wrong role)       | 403     | `status === 403`, validate body with schema or check `null`  |
-| Empty body (for POST/PUT/PATCH)             | 400/422 | Error schema parse passes                                    |
-| Each required field omitted individually    | 400/422 | One test per field — see Negative Testing below              |
-| Each field with type-inappropriate values   | 400/422 | `for...of` loop per field — see Negative Testing below       |
-| Non-existent resource ID                   | 404     | `status === 404`                                             |
-| Unsupported HTTP method                     | 405     | At least one test per endpoint                               |
-
-**Structure:** One `test.describe` per HTTP method + path. Use `beforeAll`/`afterAll` (not `beforeEach`/`afterEach`) to create/delete shared resources needed by multiple tests in the same describe block.
-
-## Negative / Validation Testing
-
-Testing only with an empty body is never sufficient. For every endpoint that accepts a body:
-
-1. **Empty body** — single test sending `{}`
-2. **Each required field omitted** — one test per field, keep all others valid
-3. **Each field with type-inappropriate values** — `for...of` loop per field
-
-### Pattern: field omission
-
-```typescript
-test.describe('POST /api/auth/login - missing required fields', () => {
-  const validPayload = { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD };
-
-  const requiredFields = ['email', 'password'] as const;
-  for (const field of requiredFields) {
-    baseTest(`should return 400 when ${field} is missing`, async ({ request }) => {
-      const { [field]: _, ...payloadWithoutField } = validPayload;
-
-      const response = await request.post(AuthEndpoints.LOGIN, { data: payloadWithoutField });
-      expect(response.status()).toBe(400);
-    });
-  }
-});
-```
-
-### Pattern: invalid field types
-
-```typescript
-const invalidEmailValues = [123, true, null, undefined, 'not-an-email'];
-for (const invalidValue of invalidEmailValues) {
-  baseTest(`should return 400 when email is ${JSON.stringify(invalidValue)}`, async ({ request }) => {
-    const response = await request.post(AuthEndpoints.LOGIN, {
-      data: { email: invalidValue, password: process.env.ADMIN_PASSWORD },
-    });
-    expect(response.status()).toBe(400);
-  });
+		expect(response.status()).toBe(400);
+	});
 }
 ```
 
-## Behavior Mismatch Protocol
+This is the legitimate escape-hatch case: service methods build well-formed payloads by design, so a deliberately malformed body has to go through the raw context. Mark it.
 
-When the API's actual behavior differs from the expected status code:
-
-1. **Never silently drop the test** — it must exist in the file.
-2. Write the test as the spec says it **should** work.
-3. Wrap it with `test.skip` and add a `// FIXME:` comment:
+### Invalid field types
 
 ```typescript
-// FIXME: API returns 500 instead of 400 for missing password field. Backend bug.
-baseTest.skip('should return 400 when password is missing', async ({ request }) => {
-  const response = await request.post(AuthEndpoints.LOGIN, {
-    data: { email: process.env.ADMIN_EMAIL },
-  });
-  expect(response.status()).toBe(400);
+const invalidEmails = [123, true, null, "not-an-email"];
+
+for (const invalidValue of invalidEmails) {
+	test(`Login returns 400 when email is ${JSON.stringify(invalidValue)}`, async ({ authRequest }) => {
+		const response = await authRequest.post(AuthEndpoints.LOGIN, {
+			data: { email: invalidValue, password: USERS.admin.password },
+		});
+
+		expect(response.status()).toBe(400);
+	});
+}
+```
+
+## When the API misbehaves
+
+Write the test as the spec says it _should_ work, then `test.skip` it with a `// FIXME` naming the actual behaviour. Never bend the expected status to match a bug, and never silently omit the case.
+
+```typescript
+// FIXME: API returns 500 instead of 400 for missing password. Backend bug.
+test.skip("Login returns 400 when password is missing", async ({ authRequest }) => {
+	const response = await authRequest.post(AuthEndpoints.LOGIN, { data: { email: USERS.admin.email } });
+
+	expect(response.status()).toBe(400);
 });
 ```
-
-Never adjust the expected status code to match buggy behavior.
-
-## Environment Variables
-
-| Variable                                               | File             | Purpose                                  |
-| ------------------------------------------------------ | ---------------- | ---------------------------------------- |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD`                       | `tests/api/.env` | `adminContext` login credentials         |
-| `LEADER_EMAIL` / `LEADER_PASSWORD`                     | `tests/api/.env` | `leaderContext` login credentials        |
-| `MENTOR_EMAIL` / `MENTOR_PASSWORD`                     | `tests/api/.env` | `mentorContext` login credentials        |
-| `MENTORSHIP_ADMIN_EMAIL` / `MENTORSHIP_ADMIN_PASSWORD` | `tests/api/.env` | `mentorshipAdminContext` login credentials |
-| `API_HOST`                                             | `tests/api/.env` | `baseURL` for all API requests           |
-| `API_KEY`                                              | `tests/api/.env` | `X-API-KEY` header (all contexts)        |
-
-`API_HOST` is set as `baseURL` in `playwright.config.ts` for the `api` project, so relative paths like `/api/auth/login` resolve automatically.
-
-## Fixtures Architecture
-
-```
-helpers/fixtures/fixtures.ts   — authRequest, role contexts, contextForRole factory
-```
-
-- `authRequest` — `APIRequestContext` with `API_HOST` as `baseURL` and the `X-API-KEY` header only (public/registration endpoints).
-- `tokenFor(role)` (worker-scoped) — logs a role in via `POST /api/auth/login` once per worker and caches the token.
-- `contextForRole(role)` — builds an `APIRequestContext` with `X-API-KEY` + that role's `Authorization: Bearer <token>`.
-- `adminContext` / `leaderContext` / `mentorContext` / `mentorshipAdminContext` — convenience shorthands over `contextForRole`.

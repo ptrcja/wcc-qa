@@ -14,7 +14,13 @@ export const mentorResponseSchema = z.object({
 		countryCode: z.string(),
 		countryName: z.string(),
 	}),
-	memberTypes: z.array(z.string()),
+	// FIXME: backend omits `memberTypes` from the mentor response even though the
+	// server sets it (MentorshipService.create) and the domain marks it @NotEmpty.
+	// Cause: Mentor.buildFromMentor() copies 24 fields into MentorDto but not this
+	// one, so it serializes as null. MentorDto.merge() handles it correctly, so the
+	// update path returns it and the create path doesn't. Make this required again
+	// once the backend is fixed.
+	memberTypes: z.array(z.string()).optional(),
 	skills: z.object({
 		yearsExperience: z.number(),
 		areas: z.array(
