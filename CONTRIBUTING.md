@@ -4,6 +4,33 @@
 
 Firstly thanks for your contributions!!! :sparkling_heart::sparkling_heart:
 
+## Find something to work on
+
+The first step to start contributing is to find something to work on. Help is always welcome,
+and no contribution is too small!
+
+Please browse the current open
+[issues](https://github.com/Women-Coding-Community/wcc-qa/issues). When choosing an issue,
+check its labels to understand what kind of contribution is expected:
+
+- `good first issue` — a good starting point for newcomers.
+- `help wanted` — issues where additional contributors are welcome.
+- `bug` — something that is not working as expected.
+- `enhancement` — an improvement or new functionality.
+- `documentation` — changes or improvements to the documentation.
+
+Before starting work on an issue, leave a comment on the issue expressing your interest and
+wait to be assigned to it by a repository owner. This helps avoid multiple contributors
+working on the same issue and ensures that the work is coordinated.
+
+If you are unsure whether an issue is suitable for you, feel free to ask in the issue before
+starting work.
+
+If you are adding a test rather than fixing one, check
+[`tests/api/TEST_PLAN.md`](tests/api/TEST_PLAN.md) first — it lists the flows and test cases
+already planned, so you can pick one up instead of duplicating work. Every API test ID needs a
+row in that file, added in the same change.
+
 ## PRE-REQUISITE
 
 1. 📖 Read up on fork & pull request models
@@ -38,6 +65,11 @@ npm run test:api
 ```
 
 `tests/.env` is git-ignored and must stay that way. **Never commit real credentials.**
+
+New tests are expected to follow the existing layering — clients, services and fixtures. The
+[API Architecture](README.md#api-architecture) section of the README explains it in full, and
+[CLAUDE.md](CLAUDE.md) holds the file naming conventions and the mandatory and recommended
+patterns.
 
 ## ⭐ How To Make A Pull Request:
 
@@ -131,40 +163,18 @@ checklist before asking for a review.
 the project forward. Otherwise, it will be given constructive feedback and suggestions for the
 changes needed to add the PR to the codebase._**
 
-## Find something to work on
+**A few things that make a pull request easier to review:**
 
-The first step to start contributing is to find something to work on.
-Help is always welcome, and no contribution is too small!
-
-Please browse the current open [issues](https://github.com/Women-Coding-Community/wcc-qa/issues).
-
-If you are adding a test rather than fixing one, check
-[`tests/api/TEST_PLAN.md`](tests/api/TEST_PLAN.md) first — it lists the flows and test cases
-already planned, so you can pick one up instead of duplicating work. Every API test ID needs a
-row in that file, added in the same change.
-
-## Code Pattern Guide :memo:
-
-The suite is type-safe end to end, and new tests are expected to follow the existing layering.
-The [API Architecture](README.md#api-architecture) section of the README explains it in full.
-In short:
-
-- **Clients** (`helpers/apifactory/clients/`) — transport only. One method per endpoint,
-  returning the raw `APIResponse`. No assertions, no parsing.
-- **Services** (`helpers/apifactory/services/`) — build the request payload, optionally call
-  `ensureSuccess`, and always return `TypedAPIResponse<T>`.
-- **Fixtures** (`helpers/fixtures/`) — role-scoped API access (`adminApi`, `mentorApi`, …) and
-  the page objects. Import the merged `test` from `helpers/fixtures`.
-
-A few conventions worth knowing:
-
-- Use bare imports resolved through the tsconfig `paths` (`helpers/fixtures`), not relative
-  `../../` paths.
-- Validate responses with the Zod schemas in `helpers/datafactory/schemas/` so shape drift
-  fails the test.
-- Build test data with the Faker factories rather than hardcoding values.
-- Name API specs `[name].flow.spec.ts` and admin specs `[name].spec.ts`. The full table is
-  in [CLAUDE.md](CLAUDE.md), which also holds the mandatory and recommended patterns in detail.
+- Keep pull requests small and focused on one issue. Several small PRs are easier to review
+  than one large one, and they get merged faster.
+- If the PR will _completely_ fix a specific issue, include `Closes #123` in the PR body (where
+  123 is the specific issue number the PR will fix). This will automatically close the issue
+  when the PR is merged.
+- Include a clear and detailed PR description explaining the reasons for the changes, so the
+  reviewer has enough information to understand your PR.
+- Never attach traces, HTML reports or `test-results/` to an issue or a pull request. They
+  capture request headers, including `Authorization` tokens and `X-API-KEY`. Paste the
+  relevant terminal output instead.
 
 ## Style Guide for Git Commit Messages :memo:
 
@@ -181,6 +191,7 @@ Common types are `feat`, `fix`, `docs`, `test`, `refactor` and `chore`.
 
 **How you can add more value to your contribution logs:**
 
+- Write clear and meaningful git commit messages.
 - Use the present tense. (Example: "Add feature" instead of "Added feature")
 - Use the imperative mood. (Example: "Move item to...", instead of "Moves item to...")
 - Limit the first line (also called the Subject Line) to _50 characters or less_.
@@ -189,43 +200,10 @@ Common types are `feat`, `fix`, `docs`, `test`, `refactor` and `chore`.
 - Do not end the subject line with a period.
 - Wrap the body at _72 characters_.
 - Use the body to explain the _what_, _why_, _vs_, and _how_.
-
-## Best practices
-
-- Run the checks before opening a PR:
-
-  ```bash
-  npm run lint
-  npm run format
-  npm run typecheck
-  ```
-
-  These three only report problems. `npm run lint:fix` and `npm run format:fix` apply what
-  ESLint and Prettier can fix on their own.
-
-  A Husky pre-commit hook also runs lint-staged over the files you staged and re-stages
-  whatever it fixes. If ESLint reports something it cannot fix automatically, the commit is
-  aborted so you can resolve it first. The hook installs itself on `npm install`, so there is
-  nothing extra to set up.
-
-- Make sure `npm run lint` and `npm run typecheck` pass before you ask for a review.
-- Keep pull requests small and focused on one issue. Several small PRs are easier to review
-  than one large one, and they get merged faster.
-- Never commit `tests/.env`, saved sessions from `tests/admin/.auth/`, or any real
-  credentials.
-- Never attach traces, HTML reports or `test-results/` to an issue or a pull request. They
-  capture request headers, including `Authorization` tokens and `X-API-KEY`. Paste the
-  relevant terminal output instead.
-- Write clear and meaningful git commit messages.
-- If the PR will _completely_ fix a specific issue, include `fixes #123` in the PR body (where
-  123 is the specific issue number the PR will fix). This will automatically close the issue
-  when the PR is merged.
-- Make sure you don't include `@mentions` or `fixes` keywords in your git commit messages.
-  These should be included in the PR body instead.
+- Don't include `@mentions` or `Closes`/`fixes` keywords in your commit messages. These belong
+  in the PR body instead.
 - When you make a PR for a small change (such as fixing a typo, style change, or grammar fix),
   please squash your commits so that we can maintain a cleaner git history.
-- Make sure you include a clear and detailed PR description explaining the reasons for the
-  changes, and ensuring there is sufficient information for the reviewer to understand your PR.
 - Additional Readings:
   - [chris.beams.io/posts/git-commit/](https://chris.beams.io/posts/git-commit/)
   - [github.com/blog/1506-closing-issues-via-pull-requests](https://github.com/blog/1506-closing-issues-via-pull-requests)
